@@ -2,11 +2,14 @@
 import {ref,computed } from 'vue'
 import haversine from 'haversine'
 import "leaflet/dist/leaflet.css"
-import { LMap, LTileLayer,LMarker,LPolyline,LIcon  } from "@vue-leaflet/vue-leaflet"
+import { LMap, LTileLayer,LMarker,LPolyline,LIcon,LControl } from "@vue-leaflet/vue-leaflet"
 import redCar from './assets/redCar.png'
+import bluefuel from './assets/bluefuel.png'  
+import redFuel from './assets/redFuel.png'
 
 let zoom = ref(30)
 let center = ref([ 6.21790086131689, 1.1200842442283416 ])
+let staticAnchor =  ref([0, 0])
 
 const res = ref()
 let  stations = ref([{
@@ -48,14 +51,10 @@ const user = ref({
   route:[]
 }) 
 
+const loader = ref(false)
 
 
-stations.value = stations.value.map(station => {
-  return {...station,distanse:haversine(user.value.location,station.location) }
-});
 
-stations.value = stations.value.sort((a,b) => a.distanse - b.distanse)
-stations.value[0].isNear = true
 
 const tab = computed(()=>{
   if(res.value){
@@ -64,6 +63,17 @@ const tab = computed(()=>{
     })
   }
   return []
+})
+
+const sationsComputed = computed(()=>{
+  let  newStations = stations.value.map(station => {
+  return {...station,distanse:haversine(user.value.location,station.location) }
+  });
+
+  newStations = newStations.sort((a,b) => a.distanse - b.distanse)
+  newStations[0].isNear = true
+
+  return newStations
 })
 
 function moveToStation(){
@@ -77,16 +87,15 @@ function moveToStation(){
     user.value.distanse += haversine(user.value.location,user.value.route.reverse()[1])
     user.value.bat =  user.value.bat - (haversine(user.value.location,user.value.route.reverse()[1])*7)
 
-    console.log(user.value.bat)
 
-  if(i <= tab.value.length -1&&user.value.bat > 0){
+  if(i <= tab.value.length -1/* &&user.value.bat > 0 */){
     i++
   }
-  if(i == tab.value.length || user.value.bat <=0){
+  if(i == tab.value.length /* || user.value.bat <=0 */){
 
     clearInterval(intervalID);
   }
-  }, 1000)
+  }, 500)
 }
 
 
@@ -94,13 +103,17 @@ function moveToStation(){
 
 async function  callDirectionApi({startLatitude,startLongitude},{endLatitude,endLongitude}) {
   try {
+      loader.value = true
       const res = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?api_key=5b3ce3597851110001cf624816ebe9921e6846be81ba3deb45ca3eba&start=${startLongitude},${startLatitude}&end=${endLongitude},${endLatitude}`)
       const body= await res.json()
+      loader.value = false
       if(body.error){
         return body.error.message      
       }
        return body?.features[0]?.geometry?.coordinates
+
   } catch (error) {
+    loader.value = false
       return error
   }
   
@@ -111,38 +124,60 @@ async function handleClick (){
     startLatitude:user.value.location.latitude,
     startLongitude: user.value.location.longitude
   },{
-    endLatitude: stations.value[0].location.latitude,
-    endLongitude: stations.value[0].location.longitude
+    endLatitude: sationsComputed.value[0].location.latitude,
+    endLongitude: sationsComputed.value[0].location.longitude
   })
 }
 
+
+
+function moveUser($e){
+   user.value.location = {
+      latitude: $e.latlng.lat,
+      longitude: $e.latlng.lng
+   } 
+}
 </script>
 
 <template>
-    <li v-for="station in stations">
-     <strong> {{ station.nom }}</strong>  : {{ station.distanse }}
-    </li>    
-
-  
-    <button @click="handleClick"> click</button>
-    <button @click="moveToStation"> move</button>
+    
     <main>
-      <l-map ref="map" v-model:zoom="zoom" v-model:center="center" :useGlobalLeaflet="false">
+      <l-map ref="map" @click="($e)=>{console.log($e)}" v-model:zoom="zoom" v-model:center="center" :useGlobalLeaflet="false">
         <l-tile-layer url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
                     layer-type="base"
                     name="Stadia Maps Basemap">
         </l-tile-layer>
+        <l-control class="custom-control">
+          <div class="btn-container">
+            <button class="button-31" @click="handleClick"> route  <span v-if="loader" class="loader"></span></button>
+            <button class="button-31" @click="moveToStation"> déplacer  </button>
+          </div>
+      </l-control>
         <l-polyline :lat-lngs="tab" color="green"></l-polyline>
-        <l-marker   :lat-lng="[user.location.latitude,user.location.longitude]" >
+        <l-marker  draggable   :lat-lng="[user.location.latitude,user.location.longitude]" @move="moveUser" >
           
           <l-icon
             :icon-anchor="staticAnchor"
             class-name="someExtraClass"
           >
-          <img :src="redCar">
+            <img :src="redCar">
+            <!-- <div class="headline" >
+                {{ user.bat }}
+            </div> -->
+          
+          </l-icon>
+        </l-marker>
+
+        <l-marker v-for="station in sationsComputed"     :lat-lng="[station.location.latitude,station.location.longitude]" :key="station.id" >
+          
+          <l-icon
+            :icon-anchor="staticAnchor"
+            class-name="someExtraClass"
+          >
           <div class="headline" >
-              {{ user.bat }}
-          </div>
+                {{  station.nom }}
+            </div>
+          <img :src=" station.isNear?redFuel:bluefuel">
           
         </l-icon>
         </l-marker>
@@ -156,8 +191,8 @@ async function handleClick (){
 
 <style scoped>
    main {
-  height: 100vh;
-  width: 100vw;
+  height: 90vh;
+  width: 98vw;
 }
 .someExtraClass {
   background-color: aqua;
@@ -173,4 +208,53 @@ async function handleClick (){
 .headline{
   color:white;
 }
+.custom-control{
+  background-color: white;
+  padding: 0 0.5em;
+  border: 1px solid #aaa;
+  border-radius: 0.1em;
+}
+.btn-container{
+}
+.button-31 {
+  background-color: #222;
+  border-radius: 4px;
+  border-style: none;
+  box-sizing: border-box;
+  color: #fff;
+  cursor: pointer;
+  display: inline-block;
+  font-family: "Farfetch Basis","Helvetica Neue",Arial,sans-serif;
+  font-weight: 700;
+  max-width: none;
+  margin-top: 2%;
+  margin-bottom: 2%;
+  outline: none;
+  padding: 9px 20px 8px;
+  width: 100%;
+}
+
+.button-31:hover,
+.button-31:focus {
+  opacity: .75;
+}
+.loader {
+    width: 20px;
+    height: 20px;
+    border: 5px solid #FFF;
+    border-bottom-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    box-sizing: border-box;
+    animation: rotation 1s linear infinite;
+    }
+
+@keyframes rotation {
+0% {
+    transform: rotate(0deg);
+}
+100% {
+    transform: rotate(360deg);
+}
+} 
 </style>
